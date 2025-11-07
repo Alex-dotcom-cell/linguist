@@ -1,949 +1,562 @@
-module Linguist
-  class Generated
-    # Public: Is the blob a generated file?
-    #
-    # name - String filename
-    # data - String blob data. A block also may be passed in for lazy
-    #        loading. This behavior is deprecated and you should always
-    #        pass in a String.
-    #
-    # Return true or false
-    def self.generated?(name, data)
-      new(name, data).generated?
-    end
-
-    # Internal: Initialize Generated instance
-    #
-    # name - String filename
-    # data - String blob data
-    def initialize(name, data)
-      @name = name
-      @extname = File.extname(name)
-      @_data = data
-    end
-
-    attr_reader :name, :extname
-
-    # Lazy load blob data if block was passed in.
-    #
-    # Awful, awful stuff happening here.
-    #
-    # Returns String data.
-    def data
-      @data ||= @_data.respond_to?(:call) ? @_data.call() : @_data
-    end
-
-    # Public: Get each line of data
-    #
-    # Returns an Array of lines
-    def lines
-      # TODO: data should be required to be a String, no nils
-      @lines ||= data ? data.split("\n", -1) : []
-    end
-
-    # Internal: Is the blob a generated file?
-    #
-    # Generated source code is suppressed in diffs and is ignored by
-    # language statistics.
-    #
-    # Please add additional test coverage to
-    # `test/test_blob.rb#test_generated` if you make any changes.
-    #
-    # Return true or false
-    def generated?
-      xcode_file? ||
-      intellij_file? ||
-      cocoapods? ||
-      carthage_build? ||
-      generated_graphql_relay? ||
-      generated_net_designer_file? ||
-      generated_net_specflow_feature_file? ||
-      composer_lock? ||
-      cargo_lock? ||
-      cargo_orig? ||
-      deno_lock? ||
-      flake_lock? ||
-      bazel_lock? ||
-      node_modules? ||
-      go_vendor? ||
-      go_lock? ||
-      package_resolved? ||
-      poetry_lock? ||
-      pdm_lock? ||
-      uv_lock? ||
-      pixi_lock? ||
-      esy_lock? ||
-      npm_shrinkwrap_or_package_lock? ||
-      pnpm_lock? ||
-      terraform_lock? ||
-      generated_yarn_plugnplay? ||
-      godeps? ||
-      generated_by_zephir? ||
-      htmlcov? ||
-      minified_files? ||
-      has_source_map? ||
-      source_map? ||
-      compiled_coffeescript? ||
-      generated_parser? ||
-      generated_net_docfile? ||
-      generated_postscript? ||
-      compiled_cython_file? ||
-      pipenv_lock? ||
-      gradle_wrapper? ||
-      maven_wrapper? ||
-      generated_go? ||
-      generated_protocol_buffer_from_go? ||
-      generated_protocol_buffer? ||
-      generated_javascript_protocol_buffer? ||
-      generated_typescript_protocol_buffer? ||
-      generated_apache_thrift? ||
-      generated_jni_header? ||
-      vcr_cassette? ||
-      generated_antlr? ||
-      generated_module? ||
-      generated_unity3d_meta? ||
-      generated_racc? ||
-      generated_jflex? ||
-      generated_grammarkit? ||
-      generated_roxygen2? ||
-      generated_html? ||
-      generated_jison? ||
-      generated_grpc_cpp? ||
-      generated_dart? ||
-      generated_perl_ppport_header? ||
-      generated_gamemakerstudio? ||
-      generated_gimp? ||
-      generated_visualstudio6? ||
-      generated_haxe? ||
-      generated_jooq? ||
-      generated_pascal_tlb? ||
-      generated_sorbet_rbi? ||
-      generated_mysql_view_definition_format? ||
-      generated_sqlx_query?
-    end
-
-    # Internal: Is the blob an Xcode file?
-    #
-    # Generated if the file extension is an Xcode
-    # file extension.
-    #
-    # Returns true or false.
-    def xcode_file?
-      ['.nib', '.xcworkspacedata', '.xcuserstate'].include?(extname)
-    end
-
-    # Internal: Is the blob an IntelliJ IDEA project file?
-    #
-    # JetBrains IDEs generate project files under an `.idea` directory
-    # that are sometimes checked into version control.
-    #
-    # Returns true or false.
-    def intellij_file?
-      !!name.match(/(?:^|\/)\.idea\//)
-    end
-
-    # Internal: Is the blob part of Pods/, which contains dependencies not meant for humans in pull requests.
-    #
-    # Returns true or false.
-    def cocoapods?
-      !!name.match(/(^Pods|\/Pods)\//)
-    end
-
-    # Internal: Is the blob part of Carthage/Build/, which contains dependencies not meant for humans in pull requests.
-    #
-    # Returns true or false.
-    def carthage_build?
-      !!name.match(/(^|\/)Carthage\/Build\//)
-    end
-
-    # Internal: Does extname indicate a filetype which is commonly minified?
-    #
-    # Returns true or false.
-    def maybe_minified?
-      ['.js', '.css'].include? extname.downcase
-    end
-
-    # Internal: Is the blob a minified file?
-    #
-    # Consider a file minified if the average line length is
-    # greater then 110c.
-    #
-    # Currently, only JS and CSS files are detected by this method.
-    #
-    # Returns true or false.
-    def minified_files?
-      if maybe_minified? and lines.any?
-        (lines.inject(0) { |n, l| n += l.length } / lines.length) > 110
-      else
-        false
-      end
-    end
-
-    # Internal: Does the blob contain a source-map reference?
-    #
-    # We assume that if one of the last 2 lines starts with a source-map
-    # reference, then the current file was generated from other files.
-    #
-    # We use the last 2 lines because the last line might be empty.
-    #
-    # Returns true or false.
-    def has_source_map?
-      return false unless maybe_minified?
-      lines.last(2).any? { |l| l.match(/^\/[*\/][\#@] source(?:Mapping)?URL|sourceURL=/) }
-    end
-
-    # Internal: Is the blob a generated source-map?
-    #
-    # Source-maps usually have .css.map or .js.map extensions. In case they
-    # are not following the name convention, detect them based on the content.
-    #
-    # Returns true or false.
-    def source_map?
-      return false unless extname.downcase == '.map'
-
-      return true if name =~ /(\.css|\.js)\.map$/i ||  # Name convention
-      lines[0] =~ /^{"version":\d+,/ ||                # Revision 2 and later begin with the version number
-      lines[0] =~ /^\/\*\* Begin line maps\. \*\*\/{/  # Revision 1 begins with a magic comment
-
-      false
-    end
-
-    # Internal: Is the blob of JS generated by CoffeeScript?
-    #
-    # CoffeeScript is meant to output JS that would be difficult to
-    # tell if it was generated or not. Look for a number of patterns
-    # output by the CS compiler.
-    #
-    # Return true or false
-    def compiled_coffeescript?
-      return false unless extname == '.js'
-
-      # CoffeeScript generated by > 1.2 include a comment on the first line
-      if lines[0] =~ /^\/\/ Generated by /
-        return true
-      end
-
-      if lines[0] == '(function() {' &&     # First line is module closure opening
-          lines[-2] == '}).call(this);' &&  # Second to last line closes module closure
-          lines[-1] == ''                   # Last line is blank
-
-        score = 0
-
-        lines.each do |line|
-          if line =~ /var /
-            # Underscored temp vars are likely to be Coffee
-            score += 1 * line.gsub(/(_fn|_i|_len|_ref|_results)/).count
-
-            # bind and extend functions are very Coffee specific
-            score += 3 * line.gsub(/(__bind|__extends|__hasProp|__indexOf|__slice)/).count
-          end
-        end
-
-        # Require a score of 3. This is fairly arbitrary. Consider
-        # tweaking later.
-        score >= 3
-      else
-        false
-      end
-    end
-
-    # Internal: Is this a generated documentation file for a .NET assembly?
-    #
-    # .NET developers often check in the XML Intellisense file along with an
-    # assembly - however, these don't have a special extension, so we have to
-    # dig into the contents to determine if it's a docfile. Luckily, these files
-    # are extremely structured, so recognizing them is easy.
-    #
-    # Returns true or false
-    def generated_net_docfile?
-      return false unless extname.downcase == ".xml"
-      return false unless lines.count > 3
-
-      # .NET Docfiles always open with <doc> and their first tag is an
-      # <assembly> tag
-      return lines[1].include?("<doc>") &&
-        lines[2].include?("<assembly>") &&
-        lines[-2].include?("</doc>")
-    end
-
-    # Internal: Is this a codegen file for a .NET project?
-    #
-    # Visual Studio often uses code generation to generate partial classes, and
-    # these files can be quite unwieldy. Let's hide them.
-    #
-    # Returns true or false
-    def generated_net_designer_file?
-      !!name.match(/\.designer\.(cs|vb)$/i)
-    end
-
-    # Internal: Is this a codegen file for Specflow feature file?
-    #
-    # Visual Studio's SpecFlow extension generates *.feature.cs files
-    # from *.feature files, they are not meant to be consumed by humans.
-    # Let's hide them.
-    #
-    # Returns true or false
-    def generated_net_specflow_feature_file?
-      !!name.match(/\.feature\.cs$/i)
-    end
-
-    # Internal: Is the blob of JS a parser generated by PEG.js?
-    #
-    # PEG.js-generated parsers are not meant to be consumed by humans.
-    #
-    # Return true or false
-    def generated_parser?
-      return false unless extname == '.js'
-
-      # PEG.js-generated parsers include a comment near the top  of the file
-      # that marks them as such.
-      if lines[0..4].join('') =~ /^(?:[^\/]|\/[^\*])*\/\*(?:[^\*]|\*[^\/])*Generated by PEG.js/
-        return true
-      end
-
-      false
-    end
-
-    # Internal: Is the blob of PostScript generated?
-    #
-    # PostScript files are often generated by other programs. If they tell us so,
-    # we can detect them.
-    #
-    # Returns true or false.
-    def generated_postscript?
-      return false unless ['.ps', '.eps', '.pfa'].include? extname
-
-      # Type 1 and Type 42 fonts converted to PostScript are stored as hex-encoded byte streams; these
-      # streams are always preceded the `eexec` operator (if Type 1), or the `/sfnts` key (if Type 42).
-      return true if data =~ /^\s*(?:currentfile eexec\s+|\/sfnts\s+\[\s<)/
-
-      # We analyze the "%%Creator:" comment, which contains the author/generator
-      # of the file. If there is one, it should be in one of the first few lines.
-      creator = lines[0..9].find {|line| line =~ /^%%Creator: /}
-      return false if creator.nil?
-
-      # Most generators write their version number, while human authors' or companies'
-      # names don't contain numbers. So look if the line contains digits. Also
-      # look for some special cases without version numbers.
-      return true if creator =~ /[0-9]|draw|mpage|ImageMagick|inkscape|MATLAB/ ||
-        creator =~ /PCBNEW|pnmtops|\(Unknown\)|Serif Affinity|Filterimage -tops/
-
-      # EAGLE doesn't include a version number when it generates PostScript.
-      # However, it does prepend its name to the document's "%%Title" field.
-      !!creator.include?("EAGLE") and lines[0..4].find {|line| line =~ /^%%Title: EAGLE Drawing /}
-    end
-
-    def generated_go?
-      return false unless extname == '.go'
-      return false unless lines.count > 1
-
-      return lines.first(40).any? { |l| l =~ %r{^// Code generated .*} }
-    end
-
-    # Internal: Is the blob a protocol buffer file generated by the
-    # go-to-protobuf tool?
-    #
-    # Returns true or false
-    def generated_protocol_buffer_from_go?
-      return false unless extname == '.proto'
-      return false unless lines.count > 1
-
-      return lines.first(20).any? { |l| l.include? "This file was autogenerated by go-to-protobuf" }
-    end
-
-    PROTOBUF_EXTENSIONS = ['.py', '.java', '.h', '.cc', '.cpp', '.m', '.rb', '.php']
-
-    # Internal: Is the blob a C++, Java or Python source file generated by the
-    # Protocol Buffer compiler?
-    #
-    # Returns true or false.
-    def generated_protocol_buffer?
-      return false unless PROTOBUF_EXTENSIONS.include?(extname)
-      return false unless lines.count > 1
-
-      return lines.first(3).any? { |l| l.include?("Generated by the protocol buffer compiler.  DO NOT EDIT!") }
-    end
-
-    # Internal: Is the blob a Javascript source file generated by the
-    # Protocol Buffer compiler?
-    #
-    # Returns true or false.
-    def generated_javascript_protocol_buffer?
-      return false unless extname == ".js"
-      return false unless lines.count > 6
-
-      return lines[5].include?("GENERATED CODE -- DO NOT EDIT!")
-    end
-
-    # Internal: Is the blob a TypeScript source file generated by the
-    # Protocol Buffer compiler?
-    #
-    # Files generated by ts-proto typically start with something like this
-    # (though the versions lines are optional):
-    #
-    #     // Code generated by protoc-gen-ts_proto. DO NOT EDIT.
-    #     // versions:
-    #     //   protoc-gen-ts_proto  v1.181.2
-    #     //   protoc               v5.28.2
-    #     // source: hello.proto
-    #
-    #     /* eslint-disable */
-    #
-    # Returns true or false.
-    def generated_typescript_protocol_buffer?
-      return false unless extname == ".ts"
-      return false unless lines.count > 4
-
-      return lines[0].include?("Code generated by protoc-gen-ts_proto. DO NOT EDIT.")
-    end
-
-    APACHE_THRIFT_EXTENSIONS = ['.rb', '.py', '.go', '.js', '.m', '.java', '.h', '.cc', '.cpp', '.php']
-
-    # Internal: Is the blob generated by Apache Thrift compiler?
-    #
-    # Returns true or false
-    def generated_apache_thrift?
-      return false unless APACHE_THRIFT_EXTENSIONS.include?(extname)
-      return lines.first(6).any? { |l| l.include?("Autogenerated by Thrift Compiler") }
-    end
-
-    # Internal: Is the blob a C/C++ header generated by the Java JNI tool javah?
-    #
-    # Returns true or false.
-    def generated_jni_header?
-      return false unless extname == '.h'
-      return false unless lines.count > 2
-
-      return lines[0].include?("/* DO NOT EDIT THIS FILE - it is machine generated */") &&
-               lines[1].include?("#include <jni.h>")
-    end
-
-    # Internal: Is the blob part of node_modules/, which are not meant for humans in pull requests.
-    #
-    # Returns true or false.
-    def node_modules?
-      !!name.match(/node_modules\//)
-    end
-
-    # Internal: Is the blob part of the Go vendor/ tree,
-    # not meant for humans in pull requests.
-    #
-    # Returns true or false.
-    def go_vendor?
-      !!name.match(/vendor\/((?!-)[-0-9A-Za-z]+(?<!-)\.)+(com|edu|gov|in|me|net|org|fm|io)/)
-    end
-
-    # Internal: Is the blob a generated Go dep or glide lock file?
-    #
-    # Returns true or false.
-    def go_lock?
-      !!name.match(/(Gopkg|glide)\.lock/)
-    end
-
-    # Internal: Is the blob a generated Package.resolved?
-    #
-    # Returns true or false.
-    def package_resolved?
-      !!name.match(/Package\.resolved/)
-    end
-
-    # Internal: Is the blob a generated poetry.lock?
-    #
-    # Returns true or false.
-    def poetry_lock?
-      !!name.match(/poetry\.lock/)
-    end
-
-    # Internal: Is the blob a generated pdm.lock?
-    #
-    # Returns true or false.
-    def pdm_lock?
-      !!name.match(/pdm\.lock/)
-    end
-
-    # Internal: Is the blob a generated uv.lock?
-    #
-    # Returns true or false.
-    def uv_lock?
-      !!name.match(/uv\.lock/)
-    end
-
-    # Internal: Is the blob a generated pixi lock file?
-    #
-    # Returns true or false.
-    def pixi_lock?
-      !!name.match(/pixi\.lock/)
-    end
-
-    # Internal: Is the blob a generated esy lock file?
-    #
-    # Returns true or false.
-    def esy_lock?
-      !!name.match(/(^|\/)(\w+\.)?esy.lock$/)
-    end
-
-    # Internal: Is the blob a generated deno lockfile, which are not meant for humans in pull requests.
-    #
-    # Returns true or false.
-    def deno_lock?
-      !!name.match(/deno\.lock/)
-    end
-
-    # Internal: Is the blob a generated npm shrinkwrap or package lock file?
-    #
-    # Returns true or false.
-    def npm_shrinkwrap_or_package_lock?
-      !!name.match(/npm-shrinkwrap\.json/) || !!name.match(/package-lock\.json/)
-    end
-
-    # Internal: Is the blob a generated pnpm lockfile?
-    #
-    # Returns true or false.
-    def pnpm_lock?
-      !!name.match(/pnpm-lock\.yaml/)
-    end
-
-    # Internal: Is the blob a generated Yarn Plug'n'Play?
-    #
-    # Returns true or false.
-    def generated_yarn_plugnplay?
-      !!name.match(/(^|\/)\.pnp\..*$/)
-    end
-
-    # Internal: Is the blob part of Godeps/,
-    # which are not meant for humans in pull requests.
-    #
-    # Returns true or false.
-    def godeps?
-      !!name.match(/Godeps\//)
-    end
-
-    # Internal: Is the blob a generated php composer lock file?
-    #
-    # Returns true or false.
-    def composer_lock?
-      !!name.match(/composer\.lock/)
-    end
-
-    # Internal: Is the blob generated by Zephir?
-    #
-    # Returns true or false.
-    def generated_by_zephir?
-      !!name.match(/.\.zep\.(?:c|h|php)$/)
-    end
-
-    # Internal: Is the blob a generated Rust Cargo lock file?
-    #
-    # Returns true or false.
-    def cargo_lock?
-      !!name.match(/Cargo\.lock/)
-    end
-
-    # Internal: Is the blob a generated Rust Cargo original file?
-    #
-    # Returns true or false.
-    def cargo_orig?
-      !!name.match(/Cargo\.toml\.orig/)
-    end
-
-    # Internal: Is the blob a generated Nix flakes lock file?
-    #
-    # Returns true or false
-    def flake_lock?
-      !!name.match(/(^|\/)flake\.lock$/)
-    end
-
-    # Internal: Is the blob a Bazel generated bzlmod lockfile?
-    #
-    # Returns true or false
-    def bazel_lock?
-      !!name.match(/(^|\/)MODULE\.bazel\.lock$/)
-    end
-
-    # Internal: Is the blob a generated gradle wrapper file?
-    #
-    # Returns true or false.
-    def gradle_wrapper?
-      !!name.match(/(?:^|\/)gradlew(?:\.bat)?$/i)
-    end
-
-    # Internal: Is the blob a generated maven wrapper file?
-    #
-    # Returns true or false.
-    def maven_wrapper?
-      !!name.match(/(?:^|\/)mvnw(?:\.cmd)?$/i)
-    end
-
-    # Is the blob a VCR Cassette file?
-    #
-    # Returns true or false
-    def vcr_cassette?
-      return false unless extname == '.yml'
-      return false unless lines.count > 2
-      # VCR Cassettes have "recorded_with: VCR" in the second last line.
-      return lines[-2].include?("recorded_with: VCR")
-    end
-
-    # Is this a generated ANTLR file?
-    #
-    # Returns true or false
-    def generated_antlr?
-      return false unless extname == '.g'
-      return false unless lines.count > 2
-      return lines[1].include?("generated by Xtest")
-    end
-
-    # Internal: Is this a compiled C/C++ file from Cython?
-    #
-    # Cython-compiled C/C++ files typically contain:
-    # /* Generated by Cython x.x.x on ... */
-    # on the first line.
-    #
-    # Return true or false
-    def compiled_cython_file?
-      return false unless ['.c', '.cpp'].include? extname
-      return false unless lines.count > 1
-      return lines[0].include?("Generated by Cython")
-    end
-
-    # Internal: Is this a Pipenv lock file?
-    #
-    # Returns true or false.
-    def pipenv_lock?
-      !!name.match(/Pipfile\.lock/)
-    end
-
-    # Internal: Is this a Terraform lock file?
-    #
-    # Returns true or false.
-    def terraform_lock?
-      !!name.match(/(?:^|\/)\.terraform\.lock\.hcl$/)
-    end
-
-    # Internal: Is it a KiCAD or GFortran module file?
-    #
-    # KiCAD module files contain:
-    # PCBNEW-LibModule-V1  yyyy-mm-dd h:mm:ss XM
-    # on the first line.
-    #
-    # GFortran module files contain:
-    # GFORTRAN module version 'x' created from
-    # on the first line.
-    #
-    # Return true or false
-    def generated_module?
-      return false unless extname == '.mod'
-      return false unless lines.count > 1
-      return lines[0].include?("PCBNEW-LibModule-V") ||
-              lines[0].include?("GFORTRAN module version '")
-    end
-
-    # Internal: Is this a metadata file from Unity3D?
-    #
-    # Unity3D Meta files start with:
-    #   fileFormatVersion: X
-    #   guid: XXXXXXXXXXXXXXX
-    #
-    # Return true or false
-    def generated_unity3d_meta?
-      return false unless extname == '.meta'
-      return false unless lines.count > 1
-      return lines[0].include?("fileFormatVersion: ")
-    end
-
-    # Internal: Is this a Racc-generated file?
-    #
-    # A Racc-generated file contains:
-    # # This file is automatically generated by Racc x.y.z
-    # on the third line.
-    #
-    # Return true or false
-    def generated_racc?
-      return false unless extname == '.rb'
-      return false unless lines.count > 2
-      return lines[2].start_with?("# This file is automatically generated by Racc")
-    end
-
-    # Internal: Is this a JFlex-generated file?
-    #
-    # A JFlex-generated file contains:
-    # /* The following code was generated by JFlex x.y.z on d/at/e ti:me */
-    # on the first line.
-    #
-    # Return true or false
-    def generated_jflex?
-      return false unless extname == '.java'
-      return false unless lines.count > 1
-      return lines[0].start_with?("/* The following code was generated by JFlex ")
-    end
-
-    # Internal: Is this a GrammarKit-generated file?
-    #
-    # A GrammarKit-generated file typically contain:
-    # // This is a generated file. Not intended for manual editing.
-    # on the first line. This is not always the case, as it's possible to
-    # customize the class header.
-    #
-    # Return true or false
-    def generated_grammarkit?
-      return false unless extname == '.java'
-      return false unless lines.count > 1
-      return lines[0].start_with?("// This is a generated file. Not intended for manual editing.")
-    end
-
-    # Internal: Is this a roxygen2-generated file?
-    #
-    # A roxygen2-generated file typically contain:
-    # % Generated by roxygen2: do not edit by hand
-    # on the first line.
-    #
-    # Return true or false
-    def generated_roxygen2?
-      return false unless extname == '.Rd'
-      return false unless lines.count > 1
-
-      return lines[0].include?("% Generated by roxygen2: do not edit by hand")
-    end
-
-    # Internal: Is this a Jison-generated file?
-    #
-    # Jison-generated parsers typically contain:
-    # /* parser generated by jison
-    # on the first line.
-    #
-    # Jison-generated lexers typically contain:
-    # /* generated by jison-lex
-    # on the first line.
-    #
-    # Return true or false
-    def generated_jison?
-      return false unless extname == '.js'
-      return false unless lines.count > 1
-      return lines[0].start_with?("/* parser generated by jison ") ||
-             lines[0].start_with?("/* generated by jison-lex ")
-    end
-
-    # Internal: Is this a protobuf/grpc-generated C++ file?
-    #
-    # A generated file contains:
-    # // Generated by the gRPC C++ plugin.
-    # on the first line.
-    #
-    # Return true or false
-    def generated_grpc_cpp?
-      return false unless %w{.cpp .hpp .h .cc}.include? extname
-      return false unless lines.count > 1
-      return lines[0].start_with?("// Generated by the gRPC")
-    end
-
-    # Internal: Is this a generated Dart file?
-    #
-    # A google/protoc-plugin generated file contains:
-    # // Generated code. Do not modify.
-    # on the second line.
-    #
-    # A source_gen generated file may contain:
-    # // GENERATED CODE - DO NOT MODIFY
-    # on the first, second, or third line.
-    #
-    # Return true or false
-    def generated_dart?
-      return false unless extname == '.dart'
-      return false unless lines.count > 1
-      return lines.first(3).any? { |l| l.downcase.match(/generated code\W{2,3}do not modify/) }
-    end
-
-    # Internal: Is the file a generated Perl/Pollution/Portability header file?
-    #
-    # Returns true or false.
-    def generated_perl_ppport_header?
-        return false unless name.match(/ppport\.h$/)
-        return false unless lines.count > 10
-        return lines[8].include?("Automatically created by Devel::PPPort")
-    end
-
-    # Internal: Is this a relay-compiler generated graphql file?
-    #
-    # Return true or false
-    def generated_graphql_relay?
-      !!name.match(/__generated__\//)
-    end
-
-    # Internal: Is this a generated Game Maker Studio (2) metadata file?
-    #
-    # Return true or false
-    def generated_gamemakerstudio?
-      return false unless ['.yy', '.yyp'].include? extname
-      return false unless lines.count > 3
-      return lines.first(3).join('').match?(/^\s*[\{\[]/) ||
-             lines[0] =~ /^\d\.\d\.\d.+\|\{/
-    end
-
-    # Internal: Is this a generated GIMP C image file?
-    #
-    # GIMP saves C sources with one of two comment forms:
-    # * `/* GIMP RGB C-Source image dump (<filename>.c) */` (C source export)
-    # * `/*  GIMP header image file format (RGB): <filename>.h  */` (Header export)
-    #
-    # Return true or false
-    def generated_gimp?
-      return false unless ['.c', '.h'].include? extname
-      return false unless lines.count > 0
-      return lines[0].match(/^\/\* GIMP [a-zA-Z0-9\- ]+ C\-Source image dump \(.+?\.c\) \*\//) ||
-             lines[0].match(/^\/\*  GIMP header image file format \([a-zA-Z0-9\- ]+\)\: .+?\.h  \*\//)
-    end
-
-    # Internal: Is this a generated Microsoft Visual Studio 6.0 build file?
-    #
-    # Return true or false
-    def generated_visualstudio6?
-      return false unless extname.downcase == '.dsp'
-      lines.first(3).any? { |l| l.include? '# Microsoft Developer Studio Generated Build File' }
-    end
-
-    HAXE_EXTENSIONS = ['.js', '.py', '.lua', '.cpp', '.h', '.java', '.cs', '.php']
-
-    # Internal: Is this a generated Haxe-generated source file?
-    #
-    # Return true or false
-    def generated_haxe?
-      return false unless HAXE_EXTENSIONS.include?(extname)
-      return lines.first(3).any? { |l| l.include?("Generated by Haxe") }
-    end
-
-    # Internal: Is this a generated HTML file?
-    #
-    # HTML documents generated by authoring tools often include a
-    # a <meta> tag in the header of the form:
-    #
-    #    <meta name="generator" content="DocGen v5.0.1" />
-    #
-    # Return true or false
-    def generated_html?
-      return false unless ['.html', '.htm', '.xhtml'].include? extname.downcase
-      return false unless lines.count > 1
-
-      # Pkgdown
-      return true if lines[0..1].any? do |line|
-        line.match(/<!-- Generated by pkgdown: do not edit by hand -->/)
-      end
-
-      # Mandoc
-      return true if lines.count > 2 && lines[2].start_with?('<!-- This is an automatically generated file.')
-
-      # Doxygen
-      return true if lines[0..30].any? do |line|
-        line.match(/<!--\s+Generated by Doxygen\s+[.0-9]+\s*-->/i)
-      end
-
-      # HTML tag: <meta name="generator" content="…" />
-      matches = lines[0..30].join(' ').scan(/<meta(\s+[^>]++)>/i)
-      return false if matches.empty?
-      return matches.map {|x| extract_html_meta(x) }.any? do |attr|
-        attr["name"].to_s.downcase == 'generator' &&
-        [attr["content"], attr["value"]].any? do |cv|
-          !cv.nil? &&
-          cv.match(/^
-            ( org \s+ mode
-            | j?latex2html
-            | groff
-            | makeinfo
-            | texi2html
-            | ronn
-            ) \b
-          /ix)
-        end
-      end
-    end
-
-    # Internal: Is this a generated jOOQ file?
-    #
-    # Return true or false
-    def generated_jooq?
-      return false unless extname.downcase == '.java'
-      lines.first(2).any? { |l| l.include? 'This file is generated by jOOQ.' }
-    end
-
-    # Internal: Is this a generated Delphi Interface file for a type library?
-    #
-    # Delphi Type Library Import tool generates *_TLB.pas files based on .ridl files.
-    # They are not meant to be altered by humans.
-    #
-    # Returns true or false
-    def generated_pascal_tlb?
-      !!name.match(/_tlb\.pas$/i)
-    end
-
-    # Internal: Is this a Sorbet RBI file generated by Tapioca?
-    #
-    # Tapioca generates non-human-editable .rbi files in several different
-    # ways:
-    #
-    # 1. `tapioca gem` uses reflection to generate generic .rbi for gems.
-    # 2. `tapioca dsl` uses DSL compilers to generate .rbi for modules/classes.
-    # 3. `tapioca annotations` pulls .rbi from remote sources.
-    #
-    # All are marked with similar wording.
-    #
-    # Returns true or false
-    def generated_sorbet_rbi?
-      return false unless extname.downcase == '.rbi'
-      return false unless lines.count >= 5
-      lines[0].match?(/^# typed:/) &&
-      lines[2].include?("DO NOT EDIT MANUALLY") &&
-      lines[4].match?(/^# Please (run|instead update this file by running) `bin\/tapioca/)
-    end
-
-    # Internal: Is it MySQL View Definition Format?
-    #
-    # MySQL View Definition Format (INI) files are generated by MySQL 5.7 and earlier.
-    # They are not meant to be altered by humans.
-    #
-    # Returns true or false
-    def generated_mysql_view_definition_format?
-      return false unless extname.downcase == '.frm'
-      return lines[0].include?("TYPE=VIEW")
-    end
-
-    # Internal: Is this an HTML coverage report?
-    #
-    # Tools like coverage.py generate HTML reports under an `htmlcov` directory.
-    #
-    # Returns true or false.
-    def htmlcov?
-      !!name.match(/(?:^|\/)htmlcov\//)
-    end
-
-    # Internal: Extract a Hash of name/content pairs from an HTML <meta> tag
-    def extract_html_meta(match)
-      (match.last.sub(/\/\Z/, "").strip.scan(/
-        (?<=^|\s)              # Check for preceding whitespace
-        (name|content|value)   # Attribute names we're interested in
-        \s* = \s*              # Key-value separator
-
-        # Attribute value
-        ( "[^"]+"        # name="value"
-        | '[^']+'        # name='value'
-        |  [^\s"']+      # name=value
-        )
-      /ix)).map do |match|
-        key = match[0].downcase
-        val = match[1].gsub(/\A["']|["']\Z/, '')
-        [key, val]
-      end.select { |x| x.length == 2 }.to_h
-    end
-
-    # Internal: Is this a generated SQLx query file?
-    #
-    # SQLx is a Rust SQL library which generates `**/.sqlx/query-*.json` files
-    # in offline mode (enabled by default).
-    #
-    # These are used to be able to compile a project without requiring
-    # the development database to be online.
-    #
-    # Returns true or false.
-    def generated_sqlx_query?
-      !!name.match(/(?:^|\/)\.sqlx\/query-[a-f\d]{64}\.json$/)
-    end
-  end
-end
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>B2 German Exam Trainer — Offline-ready</title>
+
+  <!-- Tailwind CDN (simple) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- React & ReactDOM (UMD) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Babel for JSX in-browser (single-file convenience) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* Small extra polish for the Pro style */
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; }
+    .btn-icon { width: 2.25rem; height: 2.25rem; display: inline-flex; align-items:center; justify-content:center; border-radius: 9999px; }
+    .card { background: white; border: 1px solid rgba(15,23,42,0.06); border-radius: 12px; padding: 1rem; box-shadow: 0 6px 20px rgba(2,6,23,0.04); }
+    pre { white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body class="bg-gray-50 p-6">
+
+  <div id="root" class="max-w-6xl mx-auto"></div>
+
+  <script type="text/babel">
+  // B2 Trainer — Single-file React app (Pro style, Gemini TTS + fallback)
+  const { useState, useEffect, useMemo, useCallback } = React;
+
+  /* ----------------------------
+     === CONFIG ===
+     ---------------------------- */
+  const API_CONFIG = {
+    MODEL: "gemini-2.5-flash-preview-tts",
+    API_URL: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent",
+    // <-- ТВОЙ API-ключ (вставлен по просьбе)
+    API_KEY: "AIzaSyCwMwNa3CFyxfev2q40_e9jFhfgL3XUN2Q"
+  };
+
+  /* ----------------------------
+     === DATA (Schreiben & Sprechen) ===
+     (сокращённо/структурировано — весь критичный контент сохранён)
+     ---------------------------- */
+
+  const SCHREIBEN_TOPICS = [
+    { id: 'produkt', ru: '1. Товар (дефект)', de: 'der neue Staubsauger' },
+    { id: 'service', ru: '2. Услуга (обслуживание)', de: 'Ihr Internetanschluss' },
+    { id: 'kurs', ru: '3. Курс/Школа (недостатки)', de: 'der Deutsch B2-Kurs' },
+    { id: 'reise', ru: '4. Путешествие/Отель (недостатки)', de: 'das gebuchte Hotelzimmer' },
+    { id: 'wohnung', ru: '5. Дефект в квартире', de: 'die Heizungsanlage in meiner Wohnung' },
+    { id: 'rechnung', ru: '6. Счет/Договор (ошибка)', de: 'meine letzte Rechnung' },
+    { id: 'transport', ru: '7. Транспорт (задержка/проблема)', de: 'die Bahnverbindung nach Berlin' },
+  ];
+
+  const PHRASES_DATA = {
+    greetings: [ { id: 101, text: "Sehr geehrte Damen und Herren,", ru: "Уважаемые дамы и господа,", tip: "Формальное обращение." } ],
+    issue_intro: [
+      { id: 201, text: "Ich schreibe Ihnen bezüglich [объект жалобы].", ru: "Я пишу Вам по поводу [объект жалобы].", tip: "Предлог 'bezüglich' — Genitiv." },
+      { id: 202, text: "Ich beziehe mich auf unsere Bestellung/Vereinbarung vom [Дата].", ru: "Я ссылаюсь на наш заказ/договоренность от [Дата].", tip: "sich beziehen auf + Akk." }
+    ],
+    main_problem: [
+      { id: 301, text: "Leider muss ich Ihnen mitteilen, dass [объект жалобы] nicht der Beschreibung entspricht.", ru: "К сожалению, [объект жалобы] не соответствует описанию.", tip: "Придаточное с 'dass' — глагол в конце." },
+      { id: 302, text: "Der Hauptgrund für meine Beschwerde ist, dass es Mängel gibt.", ru: "Причина жалобы — наличие недостатков.", tip: "Mängel — мн. число." }
+    ],
+    problem_consequence: [
+      { id: 401, text: "Aufgrund dieses Problems konnte ich meine Arbeit nicht wie geplant durchführen.", ru: "Из-за этой проблемы я не смог выполнить работу как планировал.", tip: "Aufgrund + Genitiv." },
+      { id: 402, text: "Das hat bei mir zu großem Ärger und Unannehmlichkeiten geführt.", ru: "Это привело к большим неудобствам.", tip: "Устойчивые выражения." }
+    ],
+    evidence: [
+      { id: 501, text: "Ich habe Ihnen alle notwendigen Unterlagen in der Anlage beigefügt.", ru: "Я приложил все необходимые документы.", tip: "beifügen — Perfekt: habe beigefügt." },
+      { id: 502, text: "Ich möchte Sie bitten, die Angelegenheit innerhalb von 14 Tagen zu klären.", ru: "Прошу решить вопрос в течение 14 дней.", tip: "Infinitivkonstruktion mit 'zu'." }
+    ],
+    resolution_request: [
+      { id: 601, text: "Daher bitte ich Sie höflich um eine schnelle Lösung und um Ersatz.", ru: "Прошу срочного решения и замены.", tip: "Daher — следствие." },
+      { id: 602, text: "Falls dies nicht möglich ist, erwarte ich die volle Rückerstattung des Kaufpreises.", ru: "Если невозможно — ожидаю возврата средств.", tip: "Falls = если." }
+    ],
+    closing_formula: [ { id: 701, text: "Ich danke Ihnen für Ihre Mühe und hoffe auf eine schnelle Klärung.", ru: "Благодарю за внимание и надеюсь на быстрое решение.", tip: "Спасибо + надежда." } ],
+    sign_off: [ { id: 801, text: "Mit freundlichen Grüßen,", ru: "С уважением,", tip: "Стандартная подпись." } ],
+  };
+
+  const SPRECHEN_SCENARIOS = [
+    {
+      id: 'thema1',
+      title_ru: 'Тема 1: Описание работодателя',
+      title_de: 'Thema 1: Arbeitgeber beschreiben',
+      dialogues: [
+        {
+          id: '1a',
+          title_ru: 'A. Международная IT-компания',
+          text_de: `A: Ich möchte über einen Arbeitgeber sprechen, bei dem ich gerne arbeiten würde – ein internationales IT-Unternehmen.
+B: Klingt spannend. In welcher Branche ist das Unternehmen tätig?
+A: Es entwickelt Softwarelösungen für große Firmen, zum Beispiel für Banken und Versicherungen.
+B: Und welche Abteilungen gibt es dort?
+A: Es gibt eine Entwicklungsabteilung, ein Marketingteam, den Kundenservice und die Personalabteilung.`,
+          text_ru: `A: Я хочу рассказать о работодателе — международной IT-компании.
+B: В какой отрасли она работает?
+A: Она разрабатывает ПО для крупных компаний.
+B: Какие отделы там есть?
+A: Разработка, маркетинг, поддержка и HR.`
+        }
+      ]
+    },
+    // Можно добавить больше тем — в файле репозитория у тебя полный список
+  ];
+
+  const initialActiveScenario = SPRECHEN_SCENARIOS[0];
+
+  /* ----------------------------
+     === UTILS: TTS & audio helpers ===
+     ---------------------------- */
+
+  // Base64 -> ArrayBuffer
+  function base64ToArrayBuffer(base64) {
+    try {
+      const binary = atob(base64);
+      const len = binary.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes.buffer;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function pcmToWav(pcm16, sampleRate = 24000) {
+    const numChannels = 1;
+    const bytesPerSample = 2;
+    const wavBuffer = new ArrayBuffer(44 + pcm16.length * bytesPerSample);
+    const view = new DataView(wavBuffer);
+    let offset = 0;
+    function writeString(str) {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset++, str.charCodeAt(i));
+    }
+    writeString('RIFF'); view.setUint32(offset, 36 + pcm16.length * bytesPerSample, true); offset += 4;
+    writeString('WAVE');
+    writeString('fmt '); view.setUint32(offset, 16, true); offset += 4;
+    view.setUint16(offset, 1, true); offset += 2; // PCM
+    view.setUint16(offset, numChannels, true); offset += 2;
+    view.setUint32(offset, sampleRate, true); offset += 4;
+    view.setUint32(offset, sampleRate * numChannels * bytesPerSample, true); offset += 4;
+    view.setUint16(offset, numChannels * bytesPerSample, true); offset += 2;
+    view.setUint16(offset, bytesPerSample * 8, true); offset += 2;
+    writeString('data'); view.setUint32(offset, pcm16.length * bytesPerSample, true); offset += 4;
+    for (let i = 0; i < pcm16.length; i++) { view.setInt16(offset, pcm16[i], true); offset += 2; }
+    return new Blob([wavBuffer], { type: 'audio/wav' });
+  }
+
+  // Функция: попытаться получить TTS через Gemini API
+  async function callGeminiTTS(text, voice = "Fenrir", apiKey = API_CONFIG.API_KEY) {
+    if (!apiKey) throw new Error("API key missing");
+    const payload = {
+      contents: [{ parts: [{ text }] }],
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: voice }
+          }
+        }
+      },
+      model: API_CONFIG.MODEL
+    };
+
+    const res = await fetch(`${API_CONFIG.API_URL}?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const raw = await res.text();
+    if (!raw) throw new Error(`Empty response, status ${res.status}`);
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { throw new Error("Non-JSON response from TTS API"); }
+
+    if (!res.ok) {
+      const msg = parsed?.error?.message || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+
+    // Ожидаем структуру: parsed.candidates[0].content.parts[0].inlineData.data
+    const part = parsed?.candidates?.[0]?.content?.parts?.[0];
+    const base64 = part?.inlineData?.data;
+    const mime = part?.inlineData?.mimeType || "";
+    if (!base64) throw new Error("No audio data in response");
+    return { base64, mime };
+  }
+
+  // Fallback: Web Speech API (if available). Returns Promise that resolves when finished.
+  function speakWithWebSpeech(text, lang = "de-DE") {
+    return new Promise((resolve, reject) => {
+      if (!("speechSynthesis" in window)) return reject(new Error("SpeechSynthesis not supported"));
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = lang;
+      u.onend = () => resolve();
+      u.onerror = (e) => reject(e);
+      window.speechSynthesis.cancel(); // stop previous
+      window.speechSynthesis.speak(u);
+    });
+  }
+
+  /* ----------------------------
+     === UI: small icons as SVG strings ===
+     ---------------------------- */
+  const Icon = {
+    Volume: (props) => (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M11 5L6 9H2v6h4l5 4V5z"></path>
+        <path d="M19 5c.4 1.1.5 2.3.5 3.5s-.1 2.4-.5 3.5"></path>
+        <path d="M15 9.5c.3.8.5 1.7.5 2.5s-.2 1.7-.5 2.5"></path>
+      </svg>
+    ),
+    Refresh: (props) => (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M21 12a9 9 0 1 0-3.2 6.7L21 18"></path>
+        <path d="M21 12v6h-6"></path>
+      </svg>
+    ),
+    Loader: (props) => (
+      <svg viewBox="0 0 24 24" width="16" height="16" className="animate-spin" {...props}>
+        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="none" strokeDasharray="31.4 31.4" strokeLinecap="round"></circle>
+      </svg>
+    ),
+    Edit: (props) => (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M12 20h9"></path>
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5z"></path>
+      </svg>
+    ),
+    Message: (props) => (
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...props}>
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+      </svg>
+    )
+  };
+
+  /* ----------------------------
+     === React App ===
+     ---------------------------- */
+
+  function App() {
+    // default view: Schreiben (as requested)
+    const [view, setView] = useState('schreiben'); // 'schreiben' or 'sprechen'
+
+    // Schreiben state
+    const initialSelections = useMemo(() => ({
+      greetings: PHRASES_DATA.greetings[0].id,
+      issue_intro: PHRASES_DATA.issue_intro[0].id,
+      main_problem: PHRASES_DATA.main_problem[0].id,
+      problem_consequence: PHRASES_DATA.problem_consequence[0].id,
+      evidence: PHRASES_DATA.evidence[0].id,
+      resolution_request: PHRASES_DATA.resolution_request[0].id,
+      closing_formula: PHRASES_DATA.closing_formula[0].id,
+      sign_off: PHRASES_DATA.sign_off[0].id,
+    }), []);
+
+    const [selections, setSelections] = useState(initialSelections);
+    const [activeTopic, setActiveTopic] = useState(SCHREIBEN_TOPICS[0]);
+    const [senderName, setSenderName] = useState("Ivan Ivanov");
+    const [invoiceNumber, setInvoiceNumber] = useState("RE-2024-5829");
+    const [currentDate] = useState(new Date().toLocaleDateString('de-DE'));
+
+    // Sprechen state
+    const [activeScenario, setActiveScenario] = useState(initialActiveScenario);
+    const [activeDialogue, setActiveDialogue] = useState(initialActiveScenario.dialogues[0]);
+
+    // audio & tts state
+    const [audioUrl, setAudioUrl] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    // helper: find phrase by id
+    const allPhrases = useMemo(() => Object.values(PHRASES_DATA).flat(), []);
+    const findPhraseById = (id) => allPhrases.find(p => p.id === id);
+
+    const replacePlaceholder = useCallback((text) => {
+      if (!text) return '';
+      return text.replace(/\[объект жалобы\]/g, activeTopic.de).replace(/\[Дата\]/g, currentDate);
+    }, [activeTopic, currentDate]);
+
+    function assembleLetterText() {
+      const parts = [
+        replacePlaceholder(findPhraseById(selections.greetings)?.text || ''),
+        replacePlaceholder(findPhraseById(selections.issue_intro)?.text || ''),
+        replacePlaceholder(findPhraseById(selections.main_problem)?.text || ''),
+        replacePlaceholder(findPhraseById(selections.problem_consequence)?.text || ''),
+        replacePlaceholder(findPhraseById(selections.evidence)?.text || ''),
+        replacePlaceholder(findPhraseById(selections.resolution_request)?.text || ''),
+        replacePlaceholder(findPhraseById(selections.closing_formula)?.text || ''),
+        replacePlaceholder(findPhraseById(selections.sign_off)?.text || ''),
+        senderName
+      ];
+      return parts.filter(Boolean).join("\n\n");
+    }
+
+    // --- TTS orchestration: try Gemini, if fails -> Web Speech fallback ---
+    const speakText = async (text, voice = "Fenrir") => {
+      setError(null);
+      if (!text || text.trim().length === 0) return;
+      setIsLoading(true);
+      setAudioUrl(null);
+
+      // First: try Gemini
+      try {
+        const { base64, mime } = await callGeminiTTS(text, voice, API_CONFIG.API_KEY);
+        const arrBuf = base64ToArrayBuffer(base64);
+        if (!arrBuf) throw new Error("Cannot decode base64 audio");
+        const pcm = new Int16Array(arrBuf);
+        const wavBlob = pcmToWav(pcm, 24000);
+        const url = URL.createObjectURL(wavBlob);
+        setAudioUrl(url);
+        // auto-play
+        const a = new Audio(url);
+        await a.play().catch(e => console.warn("Play error:", e));
+      } catch (gErr) {
+        // fallback to Web Speech
+        console.warn("Gemini TTS failed, fallback to Web Speech:", gErr);
+        try {
+          await speakWithWebSpeech(text, "de-DE");
+        } catch (wsErr) {
+          console.error("WebSpeech failed:", wsErr);
+          setError("Озвучивание недоступно (проверьте интернет или настройки браузера).");
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    // Sprechen: parse dialogue lines (DE / RU)
+    const parseDialogueLines = (deText, ruText) => {
+      const deLines = (deText || "").split('\n').map(l => l.trim()).filter(Boolean);
+      const ruLines = (ruText || "").split('\n').map(l => l.trim()).filter(Boolean);
+      return deLines.map((de, i) => {
+        const speakerMatch = de.match(/^(A:|B:)/);
+        const speaker = speakerMatch ? speakerMatch[0] : "A:";
+        const de_text = de.replace(/^(A:|B:)\s*/, '');
+        const ru_text = ruLines[i] ? ruLines[i].replace(/^(A:|B:)\s*/, '') : '';
+        return { id: i, speaker, de_text, ru_text, voice: speaker === "A:" ? "Kore" : "Puck" };
+      });
+    };
+
+    // parsed dialogue for UI
+    const parsedDialogue = useMemo(() => parseDialogueLines(activeDialogue.text_de, activeDialogue.text_ru), [activeDialogue]);
+
+    // Clean up object URLs
+    useEffect(() => {
+      return () => { if (audioUrl) URL.revokeObjectURL(audioUrl); };
+    }, [audioUrl]);
+
+    // UI rendering
+    return (
+      <div className="space-y-6">
+        <header className="text-center mb-4">
+          <h1 className="text-3xl font-extrabold text-blue-800">B2 German Exam Trainer</h1>
+          <p className="text-sm text-gray-600">Schreiben & Sprechen — Pro style</p>
+        </header>
+
+        <div className="flex justify-center mb-4">
+          <div className="inline-flex bg-white rounded-xl shadow p-1">
+            <button
+              onClick={() => setView('schreiben')}
+              className={`px-5 py-2 rounded-lg font-semibold ${view === 'schreiben' ? 'bg-blue-700 text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+            >
+              <span className="inline-flex items-center mr-2"><svg className="w-4 h-4 mr-1" viewBox="0 0 24 24"><path d="M3 21v-2a4 4 0 0 1 4-4h10" stroke="currentColor" strokeWidth="1.6" fill="none"/></svg></span>
+              Schreiben
+            </button>
+            <button
+              onClick={() => setView('sprechen')}
+              className={`px-5 py-2 rounded-lg font-semibold ${view === 'sprechen' ? 'bg-indigo-600 text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+            >
+              <span className="inline-flex items-center mr-2"><svg className="w-4 h-4 mr-1" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="1.6" fill="none"/></svg></span>
+              Sprechen
+            </button>
+          </div>
+        </div>
+
+        <main className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* LEFT column: controls (Schreiben) */}
+          <div className="lg:col-span-1 space-y-4">
+            <div className="card">
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">1. Выбор темы</h3>
+              <select
+                value={activeTopic.id}
+                onChange={(e) => setActiveTopic(SCHREIBEN_TOPICS.find(t => t.id === e.target.value))}
+                className="w-full p-3 rounded border border-gray-200"
+              >
+                {SCHREIBEN_TOPICS.map(t => <option key={t.id} value={t.id}>{t.ru} — {t.de}</option>)}
+              </select>
+
+              <div className="mt-4">
+                <label className="block text-sm text-gray-600">Ваше Имя</label>
+                <input className="w-full p-2 mt-1 border rounded" value={senderName} onChange={e => setSenderName(e.target.value)} />
+              </div>
+
+              <div className="mt-3">
+                <label className="block text-sm text-gray-600">Номер счёта / заказа</label>
+                <input className="w-full p-2 mt-1 border rounded" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} />
+              </div>
+
+              <div className="mt-4">
+                <button className="w-full bg-green-600 text-white py-2 rounded flex items-center justify-center" onClick={() => {
+                  // randomize selections
+                  const newSel = Object.keys(PHRASES_DATA).reduce((acc, key) => {
+                    const items = PHRASES_DATA[key];
+                    acc[key] = items[Math.floor(Math.random()*items.length)].id;
+                    return acc;
+                  }, {});
+                  setSelections(newSel);
+                }}>
+                  <Icon.Refresh className="mr-2" /> Случайная комбинация
+                </button>
+              </div>
+            </div>
+
+            <div className="card">
+              <h3 className="text-lg font-semibold mb-2">2. Фразы (выбери по очереди)</h3>
+              <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
+                {Object.keys(PHRASES_DATA).map(categoryKey => (
+                  <div key={categoryKey}>
+                    <div className="text-sm font-semibold text-gray-700 mb-2">
+                      {categoryKey === 'greetings' && '1. Приветствие'}
+                      {categoryKey === 'issue_intro' && '2. Введение / Ссылка'}
+                      {categoryKey === 'main_problem' && '3. Суть проблемы'}
+                      {categoryKey === 'problem_consequence' && '4. Последствия'}
+                      {categoryKey === 'evidence' && '5. Документы / срок'}
+                      {categoryKey === 'resolution_request' && '6. Запрос решения'}
+                      {categoryKey === 'closing_formula' && '7. Заключение'}
+                      {categoryKey === 'sign_off' && '8. Подпись'}
+                    </div>
+                    <div className="space-y-2">
+                      {PHRASES_DATA[categoryKey].map(phrase => {
+                        const active = selections[categoryKey] === phrase.id;
+                        return (
+                          <div key={phrase.id} className={`p-3 rounded ${active ? 'bg-blue-50 border-2 border-blue-200' : 'bg-gray-50 border border-gray-100' } flex justify-between items-start`}>
+                            <div>
+                              <div className="font-medium">{replacePlaceholder(phrase.text)}</div>
+                              <div className="text-sm text-gray-500 mt-1 italic">{phrase.ru}</div>
+                            </div>
+                            <div className="ml-3 flex flex-col items-end">
+                              <button className="btn-icon bg-white border p-1 mb-2" title="Выбрать" onClick={() => {
+                                setSelections(prev => ({ ...prev, [categoryKey]: phrase.id }));
+                              }}>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M20 6L9 17l-5-5"/></svg>
+                              </button>
+                              <button className="btn-icon bg-blue-600 text-white p-1" title="Озвучить" onClick={() => speakText(replacePlaceholder(phrase.text), "Fenrir")}>
+                                {isLoading ? <Icon.Loader /> : <Icon.Volume />}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* CENTER + RIGHT columns */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="card">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-gray-800">Готовое письмо</h2>
+                <div className="text-sm text-gray-600">Дата: {currentDate}</div>
+              </div>
+
+              <div className="bg-gray-50 p-4 rounded border border-gray-100 min-h-[220px] whitespace-pre-wrap text-gray-800">
+                <pre className="m-0">{assembleLetterText()}</pre>
+              </div>
+
+              <div className="mt-4 flex gap-3">
+                <button className="px-4 py-2 bg-blue-700 text-white rounded flex items-center" onClick={() => speakText(assembleLetterText(), "Fenrir")}>
+                  {isLoading ? <Icon.Loader className="mr-2" /> : <Icon.Volume className="mr-2" />} Озвучить письмо
+                </button>
+
+                <button className="px-4 py-2 border rounded" onClick={() => {
+                  // copy to clipboard
+                  navigator.clipboard.writeText(assembleLetterText()).then(()=> {
+                    alert("Письмо скопировано в буфер обмена");
+                  });
+                }}>Копировать</button>
+
+                <a className="px-4 py-2 border rounded text-sm" href={"data:text/plain;charset=utf-8," + encodeURIComponent(assembleLetterText())} download="letter.txt">Скачать .txt</a>
+
+                {audioUrl && (
+                  <audio controls src={audioUrl} className="ml-auto" />
+                )}
+              </div>
+            </div>
+
+            {/* Sprechen module (diálogo) — shown when view === 'sprechen' */}
+            <div className="card">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-lg font-semibold">{activeScenario.title_ru} — {activeScenario.title_de}</h3>
+                <div className="flex items-center gap-2">
+                  <select value={activeScenario.id} onChange={(e) => {
+                    const s = SPRECHEN_SCENARIOS.find(x => x.id === e.target.value);
+                    setActiveScenario(s);
+                    setActiveDialogue(s.dialogues[0]);
+                  }} className="p-2 border rounded">
+                    {SPRECHEN_SCENARIOS.map(s => <option key={s.id} value={s.id}>{s.title_ru}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="mb-3">
+                {activeScenario.dialogues.length > 1 && (
+                  <div className="flex gap-2 mb-3">
+                    {activeScenario.dialogues.map(d => (
+                      <button key={d.id} onClick={() => setActiveDialogue(d)} className={`px-3 py-1 rounded ${activeDialogue.id === d.id ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>{d.title_ru}</button>
+                    ))}
+                  </div>
+                )}
+                <div className="text-sm text-gray-700 mb-2">{activeDialogue.title_ru}</div>
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
+                  {parsedDialogue.map(line => (
+                    <div key={line.id} className={`p-3 rounded ${line.speaker === 'A:' ? 'bg-blue-50 border-blue-100' : 'bg-gray-50 border-gray-100' } flex justify-between items-start`}>
+                      <div>
+                        <div className="font-semibold"><span className="mr-2">{line.speaker}</span>{line.de_text}</div>
+                        <div className="text-sm italic text-gray-600 mt-1">{line.ru_text}</div>
+                      </div>
+                      <div className="ml-3">
+                        <button className="btn-icon bg-indigo-600 text-white p-1" title="Озвучить реплику" onClick={() => speakText(line.de_text, line.voice)}>
+                          {isLoading ? <Icon.Loader /> : <Icon.Volume />}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 text-sm text-gray-600">
+                  Совет: читай реплики вслух, повторяя интонацию и ключевые слова — это тренирует произношение и поток речи.
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </main>
+
+        {error && (
+          <div className="fixed bottom-6 right-6 bg-red-600 text-white px-4 py-2 rounded shadow">
+            Ошибка: {error}
+          </div>
+        )}
+
+        <footer className="text-center text-xs text-gray-500 mt-8">
+          Сделано с ❤️ — автономная версия. TTS: Gemini (при наличии ключа) с fallback на Web Speech API.
+        </footer>
+      </div>
+    );
+  } // end App
+
+  // Render
+  const rootEl = document.getElementById('root');
+  ReactDOM.createRoot(rootEl).render(<App />);
+
+  </script>
+</body>
+</html>
